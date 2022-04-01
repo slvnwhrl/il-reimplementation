@@ -23,6 +23,7 @@ class Sample:
 
 @dataclasses.dataclass
 class TrainingBatch:
+    """Batch used for training."""
     encoded_input: torch.tensor
     action_history: torch.tensor
     alignment_history: torch.tensor
@@ -32,6 +33,18 @@ class TrainingBatch:
 
 @dataclasses.dataclass
 class EvalBatch:
+    """Batch used for eval purposes, i.e., when transduce method is used and loss calculation is needed
+    (similar to training)."""
+    input: List[str]
+    target: List[str]
+    encoded_input: torch.tensor
+    optimal_actions_mask: torch.tensor
+    valid_actions_mask: torch.tensor
+
+
+@dataclasses.dataclass
+class TestBatch:
+    """Batch used for test purposes, i.e., when no loss is required and only output is relevant."""
     input: List[str]
     target: Optional[List[str]]
     encoded_input: torch.tensor
@@ -53,36 +66,55 @@ class Dataset(torch.utils.data.Dataset):
         else:
             self.samples.append(samples)
 
-    def get_data_loader(self, is_training: bool = False, **kwargs):
+    def get_data_loader(self, mode: str = 'training', **kwargs):
         if 'collate_fn' not in kwargs:
             if 'pad_index' not in kwargs:
                 pad_index = PAD
 
-            if is_training:
-                def collate(batch: List):
-                    max_len = len(max([s.encoded_input for s in batch], key=len))-2
-                    return TrainingBatch(
-                        torch.nn.utils.rnn.pad_sequence([s.encoded_input for s in batch],
-                                                        batch_first=True,
-                                                        padding_value=pad_index),
-                        torch.nn.utils.rnn.pad_sequence([s.action_history for s in batch],
-                                                        padding_value=pad_index),
-                        torch.nn.utils.rnn.pad_sequence([s.alignment_history for s in batch],
-                                                        batch_first=True,
-                                                        padding_value=max_len).view(-1),
-                        torch.nn.utils.rnn.pad_sequence([s.optimal_actions_mask for s in batch],
-                                                        padding_value=False),
-                        torch.nn.utils.rnn.pad_sequence([s.valid_actions_mask for s in batch],
-                                                        padding_value=False)
-                    )
-            else:
-                def collate(batch: List):
-                    return EvalBatch([s.input for s in batch],
-                                     [s.target for s in batch],
-                                     torch.nn.utils.rnn.pad_sequence([s.encoded_input for s in batch],
-                                                                     batch_first=True,
+            def collate(batch: List):
+                encoded_input = torch.nn.utils.rnn.pad_sequence([s.encoded_input for s in batch],
+                                                                batch_first=True,
+                                                                padding_value=pad_index)
+                if mode in ('eval', 'test'):
+                    input_ = [s.input for s in batch]
+                    target = [s.target for s in batch]
+
+                if mode in ('training', 'eval'):
+                    optimal_actions_mask = torch.nn.utils.rnn.pad_sequence([s.optimal_actions_mask for s in batch],
+                                                                           padding_value=False)
+                    valid_actions_mask = torch.nn.utils.rnn.pad_sequence([s.valid_actions_mask for s in batch],
+                                                                         padding_value=False)
+
+                if mode == 'training':
+                    max_len = len(max([s.encoded_input for s in batch], key=len)) - 2
+                    action_history = torch.nn.utils.rnn.pad_sequence([s.action_history for s in batch],
                                                                      padding_value=pad_index)
-                                     )
+                    alignment_history = torch.nn.utils.rnn.pad_sequence([s.alignment_history for s in batch],
+                                                                        batch_first=True,
+                                                                        padding_value=max_len).view(-1)
+                    return TrainingBatch(
+                        encoded_input=encoded_input,
+                        action_history=action_history,
+                        alignment_history=alignment_history,
+                        optimal_actions_mask=optimal_actions_mask,
+                        valid_actions_mask=valid_actions_mask
+                    )
+                elif mode == 'eval':
+                    return EvalBatch(
+                        input=input_,
+                        target=target,
+                        encoded_input=encoded_input,
+                        optimal_actions_mask=optimal_actions_mask,
+                        valid_actions_mask=valid_actions_mask
+                    )
+                elif mode == 'test':
+                    return TestBatch(
+                        input=input_,
+                        target=target,
+                        encoded_input=encoded_input
+                    )
+                else:
+                    raise f"Unsupported mode for training loader: {mode}"
 
             kwargs['collate_fn'] = collate
 

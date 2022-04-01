@@ -23,8 +23,16 @@ random.seed(1)
 def decode(transducer_: transducer.Transducer, data_loader: torch.utils.data.DataLoader,
            beam_width: int = 1) -> utils.DecodingOutput:
     if beam_width == 1:
-        decoding = lambda b: \
-            transducer_.transduce(b.input, b.encoded_input)
+        def decoding(b):
+            # check if necessary tensors in batch used for calculating loss
+            if isinstance(b, utils.EvalBatch):
+                loss_calculation = {
+                    'optimal_actions_mask': b.optimal_actions_mask,
+                    'valid_actions_mask': b.valid_actions_mask
+                }
+            else:
+                loss_calculation = None
+            return transducer_.transduce(b.input, b.encoded_input, loss_calculation)
     else:
         def decoding(b):
             final_output = transducer.Output([], [], 0)
@@ -49,14 +57,14 @@ def decode(transducer_: transducer.Transducer, data_loader: torch.utils.data.Dat
             predictions.append(f"{inputs[i]}\t{p}")
             if p == targets[i]:
                 correct += 1
-        loss += output.log_p
+        loss += output.losses if output.losses else output.log_p
         if j > 0 and j % 100 == 0:
             logging.info("\t\t...%d batches", j)
         j += 1
     logging.info("\t\t...%d batches", j)
 
     return utils.DecodingOutput(accuracy=correct / len(data_loader.dataset),
-                                loss=-loss / len(data_loader.dataset),
+                                loss=loss / len(data_loader.dataset),
                                 predictions=predictions)
 
 
@@ -155,7 +163,6 @@ def main(args: argparse.Namespace):
                                          device=args.device)
             sample = utils.Sample(input_, target, encoded_input)
             development_data.add_samples(sample)
-    development_data_loader = development_data.get_data_loader(batch_size=args.batch_size)
 
     if args.test is not None:
         test_data = utils.Dataset()
@@ -167,7 +174,7 @@ def main(args: argparse.Namespace):
                                              device=args.device)
                 sample = utils.Sample(input_, target, encoded_input)
                 test_data.add_samples(sample)
-        test_data_loader = test_data.get_data_loader(batch_size=args.batch_size)
+        test_data_loader = test_data.get_data_loader(mode='test', batch_size=args.batch_size)
 
     if args.sed_params is not None:
         sed_aligner = sed.StochasticEditDistance.from_pickle(
@@ -184,14 +191,18 @@ def main(args: argparse.Namespace):
     widgets = [progressbar.Bar(">"), " ", progressbar.ETA()]
 
     # precompute from expert
-    logging.info("Precomputing optimal actions for training samples.")
+    logging.info("Precomputing optimal actions for training and evaluation samples.")
     precompute_progress_bar = progressbar.ProgressBar(
-        widgets=widgets, maxval=len(training_data.samples)
+        widgets=widgets, maxval=len(training_data.samples)+len(development_data.samples)
     ).start()
-    for i, s in enumerate(training_data.samples):
-        precompute_from_expert(s, transducer_)
-        precompute_progress_bar.update(i)
-    training_data_loader = training_data.get_data_loader(is_training=True, batch_size=args.batch_size)
+    i = 0
+    for dataset in (training_data, development_data):
+        for s in dataset:
+            precompute_from_expert(s, transducer_)
+            precompute_progress_bar.update(i)
+            i += 1
+    training_data_loader = training_data.get_data_loader(mode='training', batch_size=args.batch_size)
+    development_data_loader = training_data.get_data_loader(mode='eval', batch_size=args.batch_size)
 
     train_progress_bar = progressbar.ProgressBar(
         widgets=widgets, maxval=args.epochs).start()
@@ -200,13 +211,14 @@ def main(args: argparse.Namespace):
     best_model_path = os.path.join(args.output, "best.model")
 
     with open(train_log_path, "w") as w:
-        w.write("epoch\tavg_loss\ttrain_accuracy\tdev_accuracy\n")
+        w.write("epoch\tavg_train_loss\tavg_dev_loss\train_accuracy\tdev_accuracy\n")
 
     optimizer = OPTIMIZER_MAPPING[args.optimizer](transducer_.parameters(), args)
     scheduler = None
     if args.scheduler:
         scheduler = LR_SCHEDULER_MAPPING[args.scheduler](optimizer, args)
-    train_subset_loader = utils.Dataset(training_data.samples[:100]).get_data_loader(batch_size=args.batch_size)
+    train_subset_loader = utils.Dataset(training_data.samples[:100]).\
+        get_data_loader(mode='eval', batch_size=args.batch_size)
     # rollin_schedule = inverse_sigmoid_schedule(args.k)
     max_patience = args.patience
 
@@ -283,7 +295,7 @@ def main(args: argparse.Namespace):
             f"patience: {patience} / {max_patience - 1}"
         )
 
-        log_line = f"{epoch}\t{avg_loss:.4f}\t{train_accuracy:.4f}\t{dev_accuracy:.4f}\n"
+        log_line = f"{epoch}\t{avg_loss:.4f}\t{avg_dev_loss:.4f}\t{train_accuracy:.4f}\t{dev_accuracy:.4f}\n"
         with open(train_log_path, "a") as a:
             a.write(log_line)
 

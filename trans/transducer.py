@@ -294,9 +294,9 @@ class Transducer(torch.nn.Module):
         )
 
         if paddings.sum() > 0:
-            log_sum_selected_terms =\
+            log_sum_selected_terms = \
                 torch.where(~paddings, log_sum_selected_terms, torch.tensor(0., device=self.device))
-            normalization_term =\
+            normalization_term = \
                 torch.where(~paddings, normalization_term, torch.tensor(0., device=self.device))
 
         return log_sum_selected_terms - normalization_term
@@ -338,9 +338,10 @@ class Transducer(torch.nn.Module):
         # build decoder input
         batch_size = encoder_output.size(1)
         input_char_embedding = encoder_output \
-            [alignment, torch.tensor([i for i in range(batch_size) for _ in range(len(alignment)//batch_size)],
+            [alignment, torch.tensor([i for i in range(batch_size) for _ in range(len(alignment) // batch_size)],
                                      device=self.device)].unsqueeze(dim=0)
-        input_char_embedding = torch.reshape(input_char_embedding, (batch_size, len(alignment)//batch_size, -1)).transpose(0, 1)
+        input_char_embedding = torch.reshape(input_char_embedding,
+                                             (batch_size, len(alignment) // batch_size, -1)).transpose(0, 1)
         previous_action_embedding = self.act_lookup(action_history)
 
         decoder_input = torch.cat(
@@ -350,7 +351,7 @@ class Transducer(torch.nn.Module):
 
         return self.dec(decoder_input, decoder_cell_state)
 
-    def calculate_actions(self, decoder_output: torch.tensor, valid_actions_mask: torch.tensor)\
+    def calculate_actions(self, decoder_output: torch.tensor, valid_actions_mask: torch.tensor) \
             -> Tuple[torch.tensor, torch.tensor]:
         """Calculates the optimal actions (by choosing the max arguments) and log probabilites given the decoder
         output and valid actions for this step.
@@ -411,13 +412,14 @@ class Transducer(torch.nn.Module):
 
         return losses
 
-    def transduce(self, input_: List[List[str]], encoded_input: torch.tensor) -> Output:
+    def transduce(self, input_: List[str], encoded_input: torch.tensor,
+                  loss_calculation: Dict = None) -> Output:
         """Runs the transducer for greedy decoding.
 
         Args:
             input_: Input string.
             encoded_input: Tensor with integer character codes with dimensions (B x L x E).
-
+            loss_calculation: Dictionary containing the necessary information for calculating loss.
         Returns:
             An Output object holding the decoded input."""
         batch_size = encoded_input.size()[0]
@@ -430,9 +432,10 @@ class Transducer(torch.nn.Module):
         action_history = torch.tensor([[[BEGIN_WORD]] * batch_size],
                                       device=self.device, dtype=torch.int)
         log_p = torch.full((1, batch_size), 0.0, device=self.device)
+        logits = torch.full((1, batch_size, self.number_actions), 0., device=self.device)
         true_input_lengths = torch.tensor(
-             # +1 because end word is not included in input
-             [len(i) + 1 for i in input_], device=self.device)
+            # +1 because end word is not included in input
+            [len(i) + 1 for i in input_], device=self.device)
 
         # run encoder
         bidirectional_emb = self.encoder_step(encoded_input)
@@ -453,9 +456,14 @@ class Transducer(torch.nn.Module):
                                                         alignment, action_history[:, :, -1])
 
             # get actions
-            actions, log_probs = self.calculate_actions(decoder_output, valid_actions_mask)
+            logits = torch.cat(
+                (logits, self.W(decoder_output)),
+                dim=0
+            )
+            log_probs = self.log_softmax(logits[-1:], valid_actions_mask)
+            actions = torch.argmax(log_probs, dim=2)
 
-            # update states
+            # update the rest of the states
             log_p += log_probs[:, torch.arange(batch_size), actions.squeeze(dim=0)]
             action_history = torch.cat(
                 (action_history, actions.unsqueeze(dim=2)),
@@ -466,7 +474,26 @@ class Transducer(torch.nn.Module):
         # adjust log_p
         # --> return the token avg. of all seqs in the batch
         true_action_lengths = action_history.size(2) - (action_history == PAD).sum(dim=2)
-        log_p = torch.mean(log_p.sum(dim=0) / true_action_lengths).item()
+        log_p = torch.mean(-log_p.sum(dim=0) / true_action_lengths).item()
+
+        # calculate losses
+        if loss_calculation:
+            size_diff = logits.size(0)-1 - loss_calculation['optimal_actions_mask'].size(0)
+            if size_diff < 0:
+                logits = torch.cat(
+                    (logits, torch.full((-size_diff, batch_size, self.number_actions), 0, device=self.device)),
+                    dim=0
+                )
+            if size_diff > 0:
+                logits = logits[:-size_diff]
+            optimal_action_lengths = \
+                torch.any(loss_calculation['optimal_actions_mask'], dim=2).sum(dim=0)
+            losses = self.log_sum_softmax_loss(logits[1:],
+                                               loss_calculation['optimal_actions_mask'],
+                                               loss_calculation['valid_actions_mask'])
+            losses = torch.mean(-torch.sum(losses) / optimal_action_lengths).item()
+        else:
+            losses = None
 
         # trim action history
         # --> first element is not considered (begin-of-sequence-token)
@@ -475,7 +502,7 @@ class Transducer(torch.nn.Module):
                           for seq in action_history.squeeze(dim=0).tolist()]
 
         return Output(action_history, self.decode_encoded_output(input_, action_history),
-                      log_p, None)
+                      log_p, losses)
 
     def decode_encoded_output(self, input_: List[List[str]], encoded_output: List[List[int]]) -> List[str]:
         """Decode a list of encoded output sequences given their string input.
@@ -498,7 +525,7 @@ class Transducer(torch.nn.Module):
         return output
 
     def decode_single_action(self, input_: Union[str, List[str]], action: Union[int, Edit],
-                    alignment: Union[int, torch.tensor]) -> Tuple[str, int, bool]:
+                             alignment: Union[int, torch.tensor]) -> Tuple[str, int, bool]:
         """Decodes a single char, given the corresponding input string, action and alignment.
 
         Args:
@@ -638,7 +665,6 @@ class Transducer(torch.nn.Module):
         if not complete_hypotheses:
             # nothing found because the model is very bad
             for hypothesis in beam:
-
                 complete_hypothesis = Output(
                     action_history=hypothesis.action_history.squeeze(dim=1).tolist()[1:],
                     output="".join(hypothesis.output),
