@@ -234,7 +234,9 @@ def main(args: argparse.Namespace):
     scheduler = None
     if args.scheduler is not None:
         scheduler = LR_SCHEDULER_MAPPING[args.scheduler](optimizer, args)
-    train_subset_loader = utils.Dataset(training_data.samples[:100]).get_data_loader(batch_size=args.batch_size)
+    train_subset_loader = utils.Dataset(
+        random.sample(training_data.samples, int(len(training_data.samples) * args.train_subset_eval_size / 100))) \
+        .get_data_loader(batch_size=args.batch_size)
     # rollin_schedule = inverse_sigmoid_schedule(args.k)
     max_patience = args.patience
 
@@ -408,6 +410,9 @@ def cli_main():
                         help="Batch size for training and evaluation.")
     parser.add_argument("--grad-accumulation", type=int, default=1,
                         help="Gradient accumulation.")
+    parser.add_argument("--train-subset-eval-size", type=int, default=5,
+                        help="Percentage of training data used to evaluate training accuracy every epoch ("
+                             "randomly sampled).")
     parser.add_argument("--optimizer", type=str, default="adadelta",
                         choices=OPTIMIZER_MAPPING.keys(),
                         help="Optimizer used in training.")
