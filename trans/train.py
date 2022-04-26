@@ -123,6 +123,16 @@ def main(args: argparse.Namespace):
     if args.pytorch_seed is not None:
         torch.manual_seed(args.pytorch_seed)
 
+        train_generator = torch.Generator()
+        train_generator.manual_seed(args.pytorch_seed)
+
+        def train_worker_init_fn(worker_id):
+            worker_seed = torch.initial_seed() % 2 ** 32
+            np.random.seed(worker_seed)
+            random.seed(worker_seed)
+    else:
+        train_generator, train_worker_init_fn = None, None
+
     if args.nfd:
         logging.info("Will perform training on NFD-normalized data.")
     else:
@@ -208,7 +218,8 @@ def main(args: argparse.Namespace):
             precomputed_train_path = os.path.join(args.output, "precomputed_train.pkl")
             training_data.persist(precomputed_train_path)
 
-    training_data_loader = training_data.get_data_loader(is_training=True, batch_size=args.batch_size, shuffle=True)
+    training_data_loader = training_data.get_data_loader(is_training=True, batch_size=args.batch_size, shuffle=True,
+                                                         generator=train_generator, worker_init_fn=train_worker_init_fn)
 
     train_progress_bar = progressbar.ProgressBar(
         widgets=widgets, maxval=args.epochs).start()
