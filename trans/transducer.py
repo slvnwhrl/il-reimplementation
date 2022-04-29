@@ -12,7 +12,8 @@ from trans import optimal_expert
 from trans import vocabulary
 from trans.actions import ConditionalCopy, ConditionalDel, ConditionalIns, \
     ConditionalSub, Edit, EndOfSequence, GenerativeEdit, BeginOfSequence
-from trans.vocabulary import BEGIN_WORD, COPY, DELETE, END_WORD, PAD
+from trans.vocabulary import BEGIN_WORD, COPY, DELETE, END_WORD, PAD, \
+    FeatureVocabularies
 from trans import ENCODER_MAPPING
 
 
@@ -87,6 +88,24 @@ class Transducer(torch.nn.Module):
 
         self.enc = ENCODER_MAPPING[args.enc_type](args)
 
+        decoder_input_dim = self.enc.output_size + args.action_dim
+
+        # feature encoder if required
+        if isinstance(vocab, FeatureVocabularies):
+            self.has_features = True
+            self.number_features = len(vocab.features)
+            self.feat_lookup = torch.nn.Embedding(
+                num_embeddings=self.number_features,
+                embedding_dim=args.feat_dim,
+                device=self.device,
+                padding_idx=PAD,
+            )
+            decoder_input_dim += args.feat_dim
+        else:
+            self.has_features = False
+            self.number_features = None
+            self.feat_lookup = None
+
         # decoder
         self.act_lookup = torch.nn.Embedding(
             num_embeddings=self.number_actions,
@@ -94,8 +113,6 @@ class Transducer(torch.nn.Module):
             device=self.device,
             padding_idx=PAD
         )
-
-        decoder_input_dim = self.enc.output_size + args.action_dim
 
         self.dec = torch.nn.LSTM(
             input_size=decoder_input_dim,
@@ -169,6 +186,28 @@ class Transducer(torch.nn.Module):
                 emb[unk_indices] = unk
 
         return emb
+
+    def feature_embedding(self, features: Optional[torch.Tensor], is_training: bool= False) -> Optional[torch.Tensor]:
+        """Computes an embedding of the all input features."""
+        if not self.has_features:
+            return None
+
+        emb = self.feat_lookup(features)  # (batch_size x features x feat_dim)
+
+        if not is_training:
+
+            unk_indices = features >= self.number_features
+            if unk_indices.sum().item() > 0:
+                # UNK is the average of trained embeddings (excluding UNK)
+                ids_tensor = torch.tensor(
+                    range(4, self.number_features),
+                    dtype=torch.int,
+                    device=self.device,
+                )
+                unk = self.feat_lookup(ids_tensor).mean(dim=0)
+                emb[unk_indices] = unk
+
+        return emb.sum(dim=1).unsqueeze(dim=0)  # (1 x batch_size x feat_dim)
 
     def compute_valid_actions(self, length_encoder_suffix: int) -> torch.tensor:
         """Computes the valid actions for a given encoder suffix as a boolean mask.
@@ -322,6 +361,7 @@ class Transducer(torch.nn.Module):
         return bidirectional_emb[1:]  # drop BEGIN_WORD
 
     def decoder_step(self, encoder_output: torch.tensor,
+                     feature_embedding: Optional[torch.tensor],
                      decoder_cell_state: torch.tensor,
                      alignment: torch.tensor,
                      action_history: torch.tensor) -> torch.tensor:
@@ -329,6 +369,7 @@ class Transducer(torch.nn.Module):
 
         Args:
             encoder_output: The encoder output.
+            feature_embedding: Optional feature embedding, the same for all decoder steps.
             decoder_cell_state: The initial decoder cell state.
             alignment: The alignment for all sequences in the batch. This tensor is of shape (L x B) x 1.
             action_history: The action history.
@@ -343,10 +384,15 @@ class Transducer(torch.nn.Module):
         input_char_embedding = torch.reshape(input_char_embedding, (batch_size, len(alignment)//batch_size, -1)).transpose(0, 1)
         previous_action_embedding = self.act_lookup(action_history)
 
-        decoder_input = torch.cat(
-            (input_char_embedding, previous_action_embedding),
-            dim=2
-        )
+        decoder_inputs = [input_char_embedding, previous_action_embedding]
+        if self.has_features:
+            # Repeats the feature embedding along the decoder steps dimension.
+            number_of_decoder_steps = previous_action_embedding.shape[0]
+            broadcast_feature_embedding = feature_embedding.\
+                repeat((number_of_decoder_steps, 1, 1))
+            decoder_inputs.append(broadcast_feature_embedding)
+
+        decoder_input = torch.cat(decoder_inputs, dim=2)
 
         return self.dec(decoder_input, decoder_cell_state)
 
@@ -372,6 +418,7 @@ class Transducer(torch.nn.Module):
         return actions, log_probs
 
     def training_step(self, encoded_input: torch.tensor,
+                      encoded_features: Optional[torch.tensor],
                       action_history: torch.tensor,
                       alignment_history: torch.tensor,
                       optimal_actions_mask: torch.tensor,
@@ -381,6 +428,7 @@ class Transducer(torch.nn.Module):
 
         Args:
             encoded_input: Encoded input character codes.
+            encoded_features: Optional encoded features.
             action_history: The action history for all sequences. During training this is based on the optimal actions (from the expert).
             alignment_history: The alignment history for all sequences. During training this is based on the optimal alignment (from the expert).
             optimal_actions_mask: A boolean mask indicating the optimal action for all tokens in the batch.
@@ -397,9 +445,13 @@ class Transducer(torch.nn.Module):
         # run encoder
         bidirectional_emb = self.encoder_step(encoded_input, True)
 
+        # compute feature embedding
+        feature_emb = self.feature_embedding(encoded_features, True)
+
         # run decoder & classifier
-        decoder_output, _ = self.decoder_step(bidirectional_emb, self.h0_c0,
-                                              alignment_history, action_history)
+        decoder_output, _ = self.decoder_step(
+            bidirectional_emb, feature_emb, self.h0_c0,
+            alignment_history, action_history)
         logits = self.W(decoder_output)
 
         # compute losses
@@ -411,12 +463,14 @@ class Transducer(torch.nn.Module):
 
         return losses
 
-    def transduce(self, input_: List[List[str]], encoded_input: torch.tensor) -> Output:
+    def transduce(self, input_: List[List[str]], encoded_input: torch.tensor,
+                  encoded_features: Optional[torch.tensor]) -> Output:
         """Runs the transducer for greedy decoding.
 
         Args:
             input_: Input string.
             encoded_input: Tensor with integer character codes with dimensions (B x L x E).
+            encoded_features: Optional tensor integer feature codes (padded and batched).
 
         Returns:
             An Output object holding the decoded input."""
@@ -437,6 +491,9 @@ class Transducer(torch.nn.Module):
         # run encoder
         bidirectional_emb = self.encoder_step(encoded_input)
 
+        # compute feature embedding
+        feature_emb = self.feature_embedding(encoded_features)
+
         # initial cell state for decoder
         decoder = self.h0_c0
 
@@ -449,8 +506,9 @@ class Transducer(torch.nn.Module):
             valid_actions_mask = self.valid_actions_lookup[:, true_input_lengths - alignment]
 
             # run decoder
-            decoder_output, decoder = self.decoder_step(bidirectional_emb, decoder,
-                                                        alignment, action_history[:, :, -1])
+            decoder_output, decoder = self.decoder_step(
+                bidirectional_emb, feature_emb, decoder,
+                alignment, action_history[:, :, -1])
 
             # get actions
             actions, log_probs = self.calculate_actions(decoder_output, valid_actions_mask)
@@ -538,12 +596,14 @@ class Transducer(torch.nn.Module):
         return char_, alignment, stop
 
     def beam_search_decode(self, input_: str, encoded_input: torch.tensor,
+                           encoded_features: Optional[torch.tensor],
                            beam_width: int) -> List[Output]:
         """Runs the transducer with beam search.
 
         Args:
             input_: Input string.
             encoded_input: List of integer character codes.
+            encoded_features: Optional tensor of feature codes.
             beam_width: Width of the beam search.
 
         Returns:
@@ -554,6 +614,10 @@ class Transducer(torch.nn.Module):
 
         # run encoder
         bidirectional_emb = self.encoder_step(encoded_input)
+
+        # compute feature embedding
+        feature_emb = self.feature_embedding(encoded_features)
+
         input_length = len(input_) + 1  # +1 because of begin-of-seq-token
 
         beam: List[Hypothesis] = [
@@ -575,7 +639,9 @@ class Transducer(torch.nn.Module):
                 length_encoder_suffix = max(input_length - hypothesis.alignment, torch.tensor([0], device=self.device))
                 valid_actions_mask = self.valid_actions_lookup[:, length_encoder_suffix]
                 # decoder
-                decoder_output, decoder = self.decoder_step(bidirectional_emb, hypothesis.decoder,
+                decoder_output, decoder = self.decoder_step(bidirectional_emb,
+                                                            feature_emb,
+                                                            hypothesis.decoder,
                                                             hypothesis.alignment,
                                                             hypothesis.action_history[-1].unsqueeze(dim=0))
                 logits = self.W(decoder_output)

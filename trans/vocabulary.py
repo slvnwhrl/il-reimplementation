@@ -130,3 +130,44 @@ class Vocabularies:
     @property
     def insertions(self):
         return self.actions.insertions
+
+
+class FeatureVocabularies(Vocabularies):
+    """Holds encodings of input characters, features, and edit actions."""
+
+    FEATURES_DELIMITER = ";"
+
+    def __init__(self, features: Optional[Iterable[str]] = None,
+                 *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.features = Vocabulary(features)
+
+    def encode_features(self, features: str) -> List[int]:
+        """Encodes all features associated with the transformation.
+
+        Applied at training time."""
+        return [
+            self.features.encode(f)
+            for f in features.split(self.FEATURES_DELIMITER)
+        ]
+
+    def encode_unseen_features(self, features: str) -> List[int]:
+        """Encodes all features associated with the transformation.
+
+        Applied at test time."""
+        return [
+            self.features.lookup(f)
+            for f in features.split(self.FEATURES_DELIMITER)
+        ]
+
+    def decode_features(self, encoded_features: Iterable[int]) -> str:
+        return self.FEATURES_DELIMITER.join(
+            self.features.decode(i) for i in encoded_features
+        )
+
+    def persist(self, filename: str):
+        vocabularies = {"characters": self.characters.to_i2w(),
+                        "actions": self.actions.to_i2w(),
+                        "features": self.features.to_i2w()}
+        with open(filename, mode="wb") as w:
+            pickle.dump(vocabularies, w)

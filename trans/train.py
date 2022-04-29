@@ -24,12 +24,14 @@ def decode(transducer_: transducer.Transducer, data_loader: torch.utils.data.Dat
            beam_width: int = 1) -> utils.DecodingOutput:
     if beam_width == 1:
         decoding = lambda b: \
-            transducer_.transduce(b.input, b.encoded_input)
+            transducer_.transduce(b.input, b.encoded_input, b.encoded_features)
     else:
         def decoding(b):
             final_output = transducer.Output([], [], 0)
             for s in range(len(b.input)):
-                o = transducer_.beam_search_decode(b.input[s], b.encoded_input[s].unsqueeze(dim=0),
+                o = transducer_.beam_search_decode(b.input[s],
+                                                   b.encoded_input[s].unsqueeze(dim=0),
+                                                   b.encoded_features[s].unsqueeze(dim=0),
                                                    beam_width)[0]
                 final_output.action_history.append(o.action_history)
                 final_output.output.append(o.output)
@@ -44,9 +46,14 @@ def decode(transducer_: transducer.Transducer, data_loader: torch.utils.data.Dat
     j = 0
     for batch in data_loader:
         output = decoding(batch)
-        inputs, targets = batch.input, batch.target
+        inputs, features, targets = \
+            batch.input, batch.features, batch.target
         for i, p in enumerate(output.output):
-            predictions.append(f"{inputs[i]}\t{p}")
+            if features is not None:
+                prediction = f"{inputs[i]}\t{p}\t{features[i]}"
+            else:
+                prediction = f"{inputs[i]}\t{p}"
+            predictions.append(prediction)
             if p == targets[i]:
                 correct += 1
         loss += output.log_p
@@ -138,32 +145,58 @@ def main(args: argparse.Namespace):
     else:
         logging.info("Will perform training on unnormalized data.")
 
+    has_features = (args.feat_dim is not None)
+    if has_features:
+        vocabulary_class = vocabulary.FeatureVocabularies
+    else:
+        vocabulary_class = vocabulary.Vocabularies
+
     if args.vocabulary is not None:
-        vocabulary_ = vocabulary.Vocabularies.from_pickle(args.vocabulary)
+        vocabulary_ = vocabulary_class.from_pickle(args.vocabulary)
         logging.info("%d actions: %s", len(vocabulary_.actions),
                      vocabulary_.actions)
         logging.info("%d chars: %s", len(vocabulary_.characters),
                      vocabulary_.characters)
+        if has_features:
+            logging.info("%d features: %s", len(vocabulary_.features),
+                         vocabulary_.features)
     else:
-        vocabulary_ = vocabulary.Vocabularies()
+        vocabulary_ = vocabulary_class()
 
     if args.precomputed_train is not None:
         training_data = utils.Dataset.from_pickle(args.precomputed_train, device=args.device)
     else:
         training_data = utils.Dataset()
+
         with utils.OpenNormalize(args.train, args.nfd) as f:
             for line in f:
-                input_, target = line.rstrip().split("\t", 1)
+                if has_features:
+                    input_, target, features = line.rstrip().split("\t", 2)
+                    encoded_features = torch.tensor(
+                        vocabulary_.encode_features(features),
+                        device=args.device,
+                    )
+                else:
+                    input_, target = line.rstrip().split("\t", 1)
+                    features = encoded_features = None
+
                 encoded_input = torch.tensor(vocabulary_.encode_input(input_),
                                              device=args.device)
                 vocabulary_.encode_actions(target)
-                sample = utils.Sample(input_, target, encoded_input)
+                sample = utils.Sample(
+                    input_, target, encoded_input,
+                    features=features,
+                    encoded_features=encoded_features,
+                )
                 training_data.add_samples(sample)
 
         logging.info("%d actions: %s", len(vocabulary_.actions),
                      vocabulary_.actions)
         logging.info("%d chars: %s", len(vocabulary_.characters),
                      vocabulary_.characters)
+        if has_features:
+            logging.info("%d features: %s", len(vocabulary_.features),
+                         vocabulary_.features)
         vocabulary_path = os.path.join(args.output, "vocabulary.pkl")
         vocabulary_.persist(vocabulary_path)
         logging.info("Wrote vocabulary to %s.", vocabulary_path)
@@ -171,10 +204,23 @@ def main(args: argparse.Namespace):
     development_data = utils.Dataset()
     with utils.OpenNormalize(args.dev, args.nfd) as f:
         for line in f:
-            input_, target = line.rstrip().split("\t", 1)
+            if has_features:
+                input_, target, features = line.rstrip().split("\t", 2)
+                encoded_features = torch.tensor(
+                    vocabulary_.encode_unseen_features(features),
+                    device=args.device,
+                )
+            else:
+                input_, target = line.rstrip().split("\t", 1)
+                features = encoded_features = None
+
             encoded_input = torch.tensor(vocabulary_.encode_unseen_input(input_),
                                          device=args.device)
-            sample = utils.Sample(input_, target, encoded_input)
+            sample = utils.Sample(
+                input_, target, encoded_input,
+                features=features,
+                encoded_features=encoded_features,
+            )
             development_data.add_samples(sample)
     development_data_loader = development_data.get_data_loader(batch_size=args.batch_size)
 
@@ -182,11 +228,26 @@ def main(args: argparse.Namespace):
         test_data = utils.Dataset()
         with utils.OpenNormalize(args.test, args.nfd) as f:
             for line in f:
-                input_, *optional_target = line.rstrip().split("\t", 1)
-                target = optional_target[0] if optional_target else None
+                if has_features:
+                    input_, optional_target, features = line.rstrip().split(
+                        "\t", 2)
+                    encoded_features = torch.tensor(
+                        vocabulary_.encode_unseen_features(features),
+                        device=args.device,
+                    )
+                    target = optional_target if optional_target else None
+                else:
+                    input_, *optional_target = line.rstrip().split("\t", 1)
+                    features = encoded_features = None
+                    target = optional_target[0] if optional_target else None
+
                 encoded_input = torch.tensor(vocabulary_.encode_unseen_input(input_),
                                              device=args.device)
-                sample = utils.Sample(input_, target, encoded_input)
+                sample = utils.Sample(
+                    input_, target, encoded_input,
+                    features=features,
+                    encoded_features=encoded_features,
+                )
                 test_data.add_samples(sample)
         test_data_loader = test_data.get_data_loader(batch_size=args.batch_size)
 
@@ -261,6 +322,7 @@ def main(args: argparse.Namespace):
             j = 0
             for j, batch in enumerate(training_data_loader):
                 losses = transducer_.training_step(encoded_input=batch.encoded_input,
+                                                   encoded_features=batch.encoded_features,
                                                    action_history=batch.action_history,
                                                    alignment_history=batch.alignment_history,
                                                    optimal_actions_mask=batch.optimal_actions_mask,
@@ -389,6 +451,9 @@ def cli_main():
                         help="Train on NFD-normalized data. Write out in NFC.")
     parser.add_argument("--char-dim", type=int, default=100,
                         help="Character peak_embedding dimension.")
+    parser.add_argument("--feat-dim", type=int, default=None,
+                        help="Feature embedding dimension, if any."
+                             "The data is assumed to be in UniMorph format.")
     parser.add_argument("--action-dim", type=int, default=100,
                         help="Action peak_embedding dimension.")
     parser.add_argument("--enc-type", type=str, default='lstm',

@@ -20,6 +20,8 @@ class Sample:
     alignment_history: Optional[torch.tensor] = None
     optimal_actions_mask: Optional[torch.tensor] = None
     valid_actions_mask: Optional[torch.tensor] = None
+    features: Optional[str] = None
+    encoded_features: Optional[torch.tensor] = None
 
 
 @dataclasses.dataclass
@@ -29,6 +31,7 @@ class TrainingBatch:
     alignment_history: torch.tensor
     optimal_actions_mask: torch.tensor
     valid_actions_mask: torch.tensor
+    encoded_features: Optional[torch.tensor] = None
 
 
 @dataclasses.dataclass
@@ -36,6 +39,8 @@ class EvalBatch:
     input: List[str]
     target: Optional[List[str]]
     encoded_input: torch.tensor
+    features: Optional[List[str]] = None
+    encoded_features: Optional[torch.tensor] = None
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -59,8 +64,23 @@ class Dataset(torch.utils.data.Dataset):
             if 'pad_index' not in kwargs:
                 pad_index = PAD
 
+            def batch_encode_features(batch: List[Sample]):
+                """Creates a padded batch of encoded features."""
+                if batch[0].encoded_features is None:
+                    encoded_features = None
+                else:
+                    features_ = [list(s.encoded_features) for s in batch]
+                    max_len = len(max(features_, key=len))
+                    pad = torch.tensor(pad_index)
+                    padded_features = [
+                        f + [pad] * (max_len - len(f))
+                        for f in features_
+                    ]
+                    encoded_features = torch.tensor(padded_features)
+                return encoded_features
+
             if is_training:
-                def collate(batch: List):
+                def collate(batch: List[Sample]):
                     max_len = len(max([s.encoded_input for s in batch], key=len)) - 2
                     return TrainingBatch(
                         torch.nn.utils.rnn.pad_sequence([s.encoded_input for s in batch],
@@ -74,15 +94,18 @@ class Dataset(torch.utils.data.Dataset):
                         torch.nn.utils.rnn.pad_sequence([s.optimal_actions_mask for s in batch],
                                                         padding_value=False),
                         torch.nn.utils.rnn.pad_sequence([s.valid_actions_mask for s in batch],
-                                                        padding_value=False)
+                                                        padding_value=False),
+                        encoded_features=batch_encode_features(batch),
                     )
             else:
-                def collate(batch: List):
+                def collate(batch: List[Sample]):
                     return EvalBatch([s.input for s in batch],
                                      [s.target for s in batch],
                                      torch.nn.utils.rnn.pad_sequence([s.encoded_input for s in batch],
                                                                      batch_first=True,
-                                                                     padding_value=pad_index)
+                                                                     padding_value=pad_index),
+                                     features=[s.features for s in batch],
+                                     encoded_features=batch_encode_features(batch),
                                      )
 
             kwargs['collate_fn'] = collate
