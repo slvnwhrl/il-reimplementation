@@ -59,7 +59,7 @@ class Dataset(torch.utils.data.Dataset):
         else:
             self.samples.append(samples)
 
-    def get_data_loader(self, is_training: bool = False, **kwargs):
+    def get_data_loader(self, is_training: bool = False, device: str = 'cpu', **kwargs):
         if 'collate_fn' not in kwargs:
             if 'pad_index' not in kwargs:
                 pad_index = PAD
@@ -71,12 +71,12 @@ class Dataset(torch.utils.data.Dataset):
                 else:
                     features_ = [list(s.encoded_features) for s in batch]
                     max_len = len(max(features_, key=len))
-                    pad = torch.tensor(pad_index)
+                    pad = torch.tensor(pad_index, device=device)
                     padded_features = [
                         f + [pad] * (max_len - len(f))
                         for f in features_
                     ]
-                    encoded_features = torch.tensor(padded_features)
+                    encoded_features = torch.tensor(padded_features, device=device)
                 return encoded_features
 
             if is_training:

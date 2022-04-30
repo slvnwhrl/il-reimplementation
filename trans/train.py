@@ -222,7 +222,8 @@ def main(args: argparse.Namespace):
                 encoded_features=encoded_features,
             )
             development_data.add_samples(sample)
-    development_data_loader = development_data.get_data_loader(batch_size=args.batch_size)
+    development_data_loader = development_data.get_data_loader(batch_size=args.batch_size,
+                                                               device=args.device)
 
     if args.test is not None:
         test_data = utils.Dataset()
@@ -249,7 +250,8 @@ def main(args: argparse.Namespace):
                     encoded_features=encoded_features,
                 )
                 test_data.add_samples(sample)
-        test_data_loader = test_data.get_data_loader(batch_size=args.batch_size)
+        test_data_loader = test_data.get_data_loader(batch_size=args.batch_size,
+                                                     device=args.device)
 
     if args.sed_params is not None:
         sed_aligner = sed.StochasticEditDistance.from_pickle(
@@ -279,8 +281,9 @@ def main(args: argparse.Namespace):
             precomputed_train_path = os.path.join(args.output, "precomputed_train.pkl")
             training_data.persist(precomputed_train_path)
 
-    training_data_loader = training_data.get_data_loader(is_training=True, batch_size=args.batch_size, shuffle=True,
-                                                         generator=train_generator, worker_init_fn=train_worker_init_fn)
+    training_data_loader = training_data.get_data_loader(is_training=True, batch_size=args.batch_size,
+                                                         device=args.device, shuffle=True, generator=train_generator,
+                                                         worker_init_fn=train_worker_init_fn)
 
     train_progress_bar = progressbar.ProgressBar(
         widgets=widgets, maxval=args.epochs).start()
@@ -297,7 +300,7 @@ def main(args: argparse.Namespace):
         scheduler = LR_SCHEDULER_MAPPING[args.scheduler](optimizer, args)
     train_subset_loader = utils.Dataset(
         random.sample(training_data.samples, int(len(training_data.samples) * args.train_subset_eval_size / 100))) \
-        .get_data_loader(batch_size=args.batch_size)
+        .get_data_loader(batch_size=args.batch_size, device=args.device)
     # rollin_schedule = inverse_sigmoid_schedule(args.k)
     max_patience = args.patience
 
