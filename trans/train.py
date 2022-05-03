@@ -201,6 +201,8 @@ def main(args: argparse.Namespace):
         vocabulary_.persist(vocabulary_path)
         logging.info("Wrote vocabulary to %s.", vocabulary_path)
 
+    eval_batch_size = args.eval_batch_size if args.eval_batch_size is not None else args.batch_size
+
     development_data = utils.Dataset()
     with utils.OpenNormalize(args.dev, args.nfd) as f:
         for line in f:
@@ -222,7 +224,7 @@ def main(args: argparse.Namespace):
                 encoded_features=encoded_features,
             )
             development_data.add_samples(sample)
-    development_data_loader = development_data.get_data_loader(batch_size=args.batch_size,
+    development_data_loader = development_data.get_data_loader(batch_size=eval_batch_size,
                                                                device=args.device)
 
     if args.test is not None:
@@ -250,7 +252,7 @@ def main(args: argparse.Namespace):
                     encoded_features=encoded_features,
                 )
                 test_data.add_samples(sample)
-        test_data_loader = test_data.get_data_loader(batch_size=args.batch_size,
+        test_data_loader = test_data.get_data_loader(batch_size=eval_batch_size,
                                                      device=args.device)
 
     if args.sed_params is not None:
@@ -300,7 +302,7 @@ def main(args: argparse.Namespace):
         scheduler = LR_SCHEDULER_MAPPING[args.scheduler](optimizer, args)
     train_subset_loader = utils.Dataset(
         random.sample(training_data.samples, int(len(training_data.samples) * args.train_subset_eval_size / 100))) \
-        .get_data_loader(batch_size=args.batch_size, device=args.device)
+        .get_data_loader(batch_size=eval_batch_size, device=args.device)
     # rollin_schedule = inverse_sigmoid_schedule(args.k)
     max_patience = args.patience
 
@@ -475,7 +477,10 @@ def cli_main():
     parser.add_argument("--epochs", type=int, default=60,
                         help="Maximal number of training epochs.")
     parser.add_argument("--batch-size", type=int, default=5,
-                        help="Batch size for training and evaluation.")
+                        help="Batch size for training.")
+    parser.add_argument("--eval-batch-size", type=int,
+                        help="Batch size for evaluation. Will be set to training batch size (--batch-size) if not"
+                             "specified.")
     parser.add_argument("--grad-accumulation", type=int, default=1,
                         help="Gradient accumulation.")
     parser.add_argument("--train-subset-eval-size", type=int, default=5,
