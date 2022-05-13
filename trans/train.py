@@ -66,6 +66,19 @@ def main(args: argparse.Namespace):
 
     os.makedirs(args.output)
 
+    if args.pytorch_seed is not None:
+        torch.manual_seed(args.pytorch_seed)
+
+        train_generator = torch.Generator()
+        train_generator.manual_seed(args.pytorch_seed)
+
+        def train_worker_init_fn(worker_id):
+            worker_seed = torch.initial_seed() % 2 ** 32
+            np.random.seed(worker_seed)
+            random.seed(worker_seed)
+    else:
+        train_generator, train_worker_init_fn = None, None
+
     if args.nfd:
         logging.info("Will perform training on NFD-normalized data.")
     else:
@@ -81,7 +94,9 @@ def main(args: argparse.Namespace):
             vocabulary_.encode_actions(target)
             sample = utils.Sample(input_, target, encoded_input)
             training_data.add_samples(sample)
-    training_data_loader = training_data.get_data_loader(batch_size=args.batch_size)
+    training_data_loader = training_data.get_data_loader(batch_size=args.batch_size, shuffle=True,
+                                                         generator=train_generator,
+                                                         worker_init_fn=train_worker_init_fn)
 
     logging.info("%d actions: %s", len(vocabulary_.actions),
                  vocabulary_.actions)
@@ -257,8 +272,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Train a g2p neural transducer.")
 
-    '''parser.add_argument("--dynet-seed", type=int, required=True,
-                        help="DyNET random seed.")''' # TODO: how to replace if at all?
+    parser.add_argument("--pytorch-seed", type=int,
+                        help="Random seed used by PyTorch.")
     parser.add_argument("--train", type=str, required=True,
                         help="Path to train set data.")
     parser.add_argument("--dev", type=str, required=True,
