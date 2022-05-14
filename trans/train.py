@@ -306,6 +306,11 @@ def main(args: argparse.Namespace):
     # rollin_schedule = inverse_sigmoid_schedule(args.k)
     max_patience = args.patience
 
+    if args.loss_reduction == "sum":
+        reduce_loss = torch.sum
+    else:
+        reduce_loss = torch.mean
+
     logging.info("Training for a maximum of %d with a maximum patience of %d.",
                  args.epochs, max_patience)
     logging.info("Number of train batches: %d.", len(training_data_loader))
@@ -333,7 +338,8 @@ def main(args: argparse.Namespace):
                                                    optimal_actions_mask=batch.optimal_actions_mask,
                                                    valid_actions_mask=batch.valid_actions_mask)
                 train_loss += torch.mean(losses.squeeze(dim=0)).item()  # mean per batch
-                losses.sum().backward()
+                reduced_loss = reduce_loss(losses) / args.grad_accumulation
+                reduced_loss.backward()
                 if j % args.grad_accumulation == 0:
                     optimizer.step()
                     if scheduler is not None and scheduler.type == 'step':
@@ -481,6 +487,8 @@ def cli_main():
     parser.add_argument("--eval-batch-size", type=int,
                         help="Batch size for evaluation. Will be set to training batch size (--batch-size) if not"
                              "specified.")
+    parser.add_argument("--loss-reduction", type=str, default="sum", choices=["sum", "mean"],
+                        help="How the loss is reduced during training.")
     parser.add_argument("--grad-accumulation", type=int, default=1,
                         help="Gradient accumulation.")
     parser.add_argument("--train-subset-eval-size", type=int, default=5,
