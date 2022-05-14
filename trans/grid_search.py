@@ -146,7 +146,7 @@ def main(args: argparse.Namespace):
                             ]
                         )
 
-                    p = subprocess.Popen(["trans-train"]+ext_args)
+                    p = subprocess.Popen(["trans-train"]+ext_args, bufsize=0)
                     process_list.append(p)
 
                     if len(process_list) < args.parallel_jobs:
