@@ -29,9 +29,11 @@ def decode(transducer_: transducer.Transducer, data_loader: torch.utils.data.Dat
         def decoding(b):
             final_output = transducer.Output([], [], 0)
             for s in range(len(b.input)):
+                encoded_features = b.encoded_features[s].unsqueeze(dim=0)\
+                    if b.encoded_features is not None else None
                 o = transducer_.beam_search_decode(b.input[s],
                                                    b.encoded_input[s].unsqueeze(dim=0),
-                                                   b.encoded_features[s].unsqueeze(dim=0),
+                                                   encoded_features,
                                                    beam_width)[0]
                 final_output.action_history.append(o.action_history)
                 final_output.output.append(o.output)
