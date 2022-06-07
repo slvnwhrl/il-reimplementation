@@ -132,7 +132,7 @@ def main(args: argparse.Namespace):
         output_path=sed_parameters_path)
     expert = optimal_expert_substitutions.OptimalSubstitutionExpert(sed_aligner)
 
-    transducer_ = transducer.Transducer(vocabulary_, expert, **dargs)  # removed model
+    transducer_ = transducer.Transducer(vocabulary_, expert, **dargs)
 
     widgets = [progressbar.Bar(">"), " ", progressbar.ETA()]
     train_progress_bar = progressbar.ProgressBar(
@@ -290,6 +290,9 @@ if __name__ == "__main__":
                         help="Action peak_embedding dimension.")
     parser.add_argument("--enc-hidden-dim", type=int, default=200,
                         help="Encoder LSTM state dimension.")
+    parser.add_argument("--enc-dropout", type=float, default=0.,
+                        help="Dropout probability after each LSTM layer"
+                             "(except the last layer).")
     parser.add_argument("--dec-hidden-dim", type=int, default=200,
                         help="Decoder LSTM state dimension.")
     parser.add_argument("--enc-layers", type=int, default=1,

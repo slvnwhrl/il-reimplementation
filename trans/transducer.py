@@ -59,8 +59,8 @@ class Expansion:
 class Transducer(torch.nn.Module):
     def __init__(self, vocab: vocabulary.Vocabularies,
                  expert: optimal_expert.Expert, char_dim: int, action_dim: int,
-                 enc_hidden_dim: int, enc_layers: int, dec_hidden_dim: int,
-                 dec_layers: int, device: str = 'cpu', **kwargs):
+                 enc_hidden_dim: int, enc_layers: int, enc_dropout: float,
+                 dec_hidden_dim: int, dec_layers: int, device: str = 'cpu', **kwargs):
 
         super().__init__()
         self.device = torch.device(device)
@@ -84,6 +84,7 @@ class Transducer(torch.nn.Module):
             input_size=char_dim,
             hidden_size=enc_hidden_dim,
             num_layers=enc_layers,
+            dropout=enc_dropout,
             bidirectional=True,
             device=self.device,
         )
