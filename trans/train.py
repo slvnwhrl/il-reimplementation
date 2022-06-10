@@ -489,7 +489,7 @@ def cli_main():
     parser.add_argument("--eval-batch-size", type=int,
                         help="Batch size for evaluation. Will be set to training batch size (--batch-size) if not"
                              "specified.")
-    parser.add_argument("--loss-reduction", type=str, default="sum", choices=["sum", "mean"],
+    parser.add_argument("--loss-reduction", type=str, default="mean", choices=["sum", "mean"],
                         help="How the loss is reduced during training.")
     parser.add_argument("--grad-accumulation", type=int, default=1,
                         help="Gradient accumulation.")
