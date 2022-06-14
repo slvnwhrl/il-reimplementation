@@ -71,35 +71,29 @@ class Adadelta(torch.optim.Adadelta):
 
 
 @register_component('inv_sr', 'lr_scheduler')
-class InvSRScheduler(torch.optim.lr_scheduler._LRScheduler):
-    """Inverse square root scheduler."""
+class WarmupInverseSquareRootSchedule(torch.optim.lr_scheduler.LambdaLR):
+    """Linear warmup and then inverse square root decay.
+    Linearly increases learning rate from 0 to 1 over `warmup_steps` training steps.
+    Inverse square root decreases learning rate from 1. to 0. over remaining steps.
+    """
+
     def __init__(self, optimizer: torch.optim, args: argparse.Namespace):
-        self.type = 'step'
         self.warmup_steps = args.warmup_steps
-        lr = optimizer.param_groups[0]['lr']
-        self.init_lr = args.warmup_init_lr if args.warmup_steps > 0 else lr
-        self.final_lr = lr
+        self.decay_factor = args.warmup_steps**0.5
+        self.type = 'step'
         super().__init__(
-            optimizer,
-            last_epoch=args.last_epoch,
-            verbose=args.verbose
+            optimizer, self.lr_lambda, last_epoch=args.last_epoch
         )
 
-    def get_lr(self):
-        if self.last_epoch == 0:
-            return [self.init_lr for group in self.optimizer.param_groups]
-        if self.last_epoch < self.warmup_steps:
-            lr = self.init_lr + ((self.final_lr - self.init_lr) / self.warmup_steps) * self.last_epoch
-        else:
-            lr = self.final_lr * (self.warmup_steps ** 0.5 if self.warmup_steps > 0 else 1) * self.last_epoch**-0.5
-        return [lr for group in self.optimizer.param_groups]
+    def lr_lambda(self, step):
+        if step < self.warmup_steps:
+            return float(step) / float(max(1, self.warmup_steps))
+        return self.decay_factor * step**-0.5
 
     @staticmethod
     def add_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--warmup-init-lr", type=float, default=0.00001)
         parser.add_argument("--warmup-steps", type=int, default=20)
         parser.add_argument("--last-epoch", type=int, default=-1)
-        parser.add_argument("--verbose", type=bool, default=False)
 
 
 @register_component('reduce_on_plateau', 'lr_scheduler')

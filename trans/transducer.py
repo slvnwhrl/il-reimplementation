@@ -85,6 +85,9 @@ class Transducer(torch.nn.Module):
             device=self.device,
             padding_idx=PAD
         )
+        if args.enc_type == 'transformer':
+            torch.nn.init.normal_(self.char_lookup.weight, mean=0, std=args.char_dim ** -0.5)
+            torch.nn.init.constant_(self.char_lookup.weight[PAD], 0)
 
         self.enc = ENCODER_MAPPING[args.enc_type](args)
 
@@ -185,9 +188,9 @@ class Transducer(torch.nn.Module):
                 unk = self.char_lookup(ids_tensor).mean(dim=0)
                 emb[unk_indices] = unk
 
-        return emb
+        return torch.transpose(emb, 0, 1)
 
-    def feature_embedding(self, features: Optional[torch.Tensor], is_training: bool= False) -> Optional[torch.Tensor]:
+    def feature_embedding(self, features: Optional[torch.Tensor], is_training: bool = False) -> Optional[torch.Tensor]:
         """Computes an embedding of the all input features."""
         if not self.has_features:
             return None
@@ -349,12 +352,12 @@ class Transducer(torch.nn.Module):
 
         Returns:
             Encoder output."""
-        input_emb = torch.transpose(self.input_embedding(encoded_input, is_training), 0, 1)
+        input_emb = self.input_embedding(encoded_input, is_training)
 
         # encoder input: L x B x E
         if isinstance(self.enc, ENCODER_MAPPING['transformer']):
-            bidirectional_emb, _ = self.enc(input_emb,
-                                            src_key_padding_mask=(encoded_input == PAD))
+            bidirectional_emb = self.enc(input_emb,
+                                         src_key_padding_mask=(encoded_input == PAD))
         else:
             bidirectional_emb, _ = self.enc(input_emb)
 
@@ -379,9 +382,10 @@ class Transducer(torch.nn.Module):
         # build decoder input
         batch_size = encoder_output.size(1)
         input_char_embedding = encoder_output \
-            [alignment, torch.tensor([i for i in range(batch_size) for _ in range(len(alignment)//batch_size)],
+            [alignment, torch.tensor([i for i in range(batch_size) for _ in range(len(alignment) // batch_size)],
                                      device=self.device)].unsqueeze(dim=0)
-        input_char_embedding = torch.reshape(input_char_embedding, (batch_size, len(alignment)//batch_size, -1)).transpose(0, 1)
+        input_char_embedding = torch.reshape(input_char_embedding,
+                                             (batch_size, len(alignment) // batch_size, -1)).transpose(0, 1)
         previous_action_embedding = self.act_lookup(action_history)
 
         decoder_inputs = [input_char_embedding, previous_action_embedding]
@@ -485,8 +489,8 @@ class Transducer(torch.nn.Module):
                                       device=self.device, dtype=torch.int)
         log_p = torch.full((1, batch_size), 0.0, device=self.device)
         true_input_lengths = torch.tensor(
-             # +1 because end word is not included in input
-             [len(i) + 1 for i in input_], device=self.device)
+            # +1 because end word is not included in input
+            [len(i) + 1 for i in input_], device=self.device)
 
         # run encoder
         bidirectional_emb = self.encoder_step(encoded_input)
@@ -556,7 +560,7 @@ class Transducer(torch.nn.Module):
         return output
 
     def decode_single_action(self, input_: Union[str, List[str]], action: Union[int, Edit],
-                    alignment: Union[int, torch.tensor]) -> Tuple[str, int, bool]:
+                             alignment: Union[int, torch.tensor]) -> Tuple[str, int, bool]:
         """Decodes a single char, given the corresponding input string, action and alignment.
 
         Args:
