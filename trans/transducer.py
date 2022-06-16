@@ -15,7 +15,7 @@ from trans.actions import ConditionalCopy, ConditionalDel, ConditionalIns, \
 from trans.vocabulary import BEGIN_WORD, COPY, DELETE, END_WORD, PAD, \
     FeatureVocabularies
 from trans import ENCODER_MAPPING
-
+from trans import utils
 
 MAX_ACTION_SEQ_LEN = 150
 MAX_INPUT_SEQ_LEN = 100
@@ -538,6 +538,99 @@ class Transducer(torch.nn.Module):
 
         return Output(action_history, self.decode_encoded_output(input_, action_history),
                       log_p, None)
+
+    def roll_in(self, sample: utils.Sample, rollin: int) -> None:
+        """Runs the transducer for greedy decoding.
+
+        Args:
+           sample: A single sample from the training data.
+           rollin: tbd.
+
+        Returns:
+            None."""
+
+        # adjust initial decoder states if batch_size has changed
+        self.h0_c0 = 1  # batch size is always zero
+
+        # initialize state variables
+        alignment_history = torch.tensor([[0]], device=self.device)
+        action_history = torch.tensor([[[BEGIN_WORD]]],
+                                      device=self.device, dtype=torch.int)
+        input_length = torch.tensor([len(sample.input) + 1], device=self.device)
+        output = []
+        optimal_actions = [[BEGIN_WORD]]
+
+        # run encoder
+        bidirectional_emb = self.encoder_step(sample.encoded_input.unsqueeze(dim=0))
+
+        # compute feature embedding
+        feature_emb = self.feature_embedding(sample.encoded_features)
+
+        # initial cell state for decoder
+        decoder = self.h0_c0
+
+        stop = False
+        while not stop and action_history.size(2) <= MAX_ACTION_SEQ_LEN:
+            current_alignment = alignment_history[:, -1]
+            valid_actions_mask = self.valid_actions_lookup[:, input_length - current_alignment]
+
+            # run decoder
+            decoder_output, decoder = self.decoder_step(
+                bidirectional_emb, feature_emb, decoder,
+                current_alignment, action_history[:, :, -1])
+
+            #  model's predictions
+            actions, log_probs = self.calculate_actions(decoder_output, valid_actions_mask)
+            log_probs_np = log_probs.squeeze().cpu().detach().numpy()
+            sample_action = self.sample(log_probs_np)
+
+            # expert prediction
+            expert_actions = self.expert_rollout(sample.input, sample.target,
+                                                 current_alignment.item(), output)
+            optimal_actions.append(expert_actions)
+
+            # update states
+            if np.random.rand() <= rollin:
+                action = sample_action
+            else:
+                action = expert_actions[
+                    int(np.argmax([log_probs_np[a] for a in expert_actions]))
+                ]
+
+            action_history = torch.cat(
+                (action_history, torch.tensor([[[action]]], device=self.device)),
+                dim=2
+            )
+
+            char, current_alignment, stop = self.decode_single_action(sample.input, action, current_alignment.item())
+            if char != "":
+                output.append(char)
+
+            alignment_history = torch.cat(
+                (alignment_history, torch.tensor([[current_alignment]], device=self.device)),
+                dim=1
+            )
+
+        # build masks
+        action_history = action_history[0, 0, :].tolist()
+        alignment_history = alignment_history[0, :].tolist()
+
+        optimal_actions_mask = torch.full(
+            (len(optimal_actions) - 1, self.number_actions),
+            False, dtype=torch.bool, device=self.device)
+        seq_pos, emb_pos = zip(*[(s - 1, a) for s in range(1, len(optimal_actions))
+                                 for a in optimal_actions[s]])
+        optimal_actions_mask[seq_pos, emb_pos] = True
+        sample.optimal_actions_mask = optimal_actions_mask
+
+        sample.alignment_history = torch.tensor(alignment_history[:-1], device=self.device)
+        sample.action_history = torch.tensor(action_history[:-1], device=self.device)
+
+        valid_actions_mask = torch.stack(
+            [self.compute_valid_actions(len(sample.input) + 1 - a) for a in alignment_history[:-1]], dim=0)
+        sample.valid_actions_mask = valid_actions_mask
+
+        return None
 
     def decode_encoded_output(self, input_: List[List[str]], encoded_output: List[List[int]]) -> List[str]:
         """Decode a list of encoded output sequences given their string input.
