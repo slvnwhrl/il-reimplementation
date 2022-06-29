@@ -539,7 +539,7 @@ class Transducer(torch.nn.Module):
         return Output(action_history, self.decode_encoded_output(input_, action_history),
                       log_p, None)
 
-    def roll_in(self, sample: utils.Sample, rollin: int) -> None:
+    def roll_in(self, sample: utils.Sample, rollin: float) -> None:
         """Runs the transducer for greedy decoding.
 
         Args:
