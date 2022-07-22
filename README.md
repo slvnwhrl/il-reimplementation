@@ -1,5 +1,5 @@
-# A G2P neural transducer
-This package contains a cli-based g2p neural transducer, similar to that used by Makarov & Clematide 2020.
+# A neural transducer
+This package contains a cli-based neural transducer for string transduction tasks. The transducer builds on the model by Makarov & Clematide (2020). This implementation introduces GPU-supported mini-batch training and batched greedy decoding as well as support for transformer-based encoders (see Wehrli & et al. (2022) for further information).
 
 ## Installation
 Please make sure that you are using Python 3.7.
@@ -149,3 +149,8 @@ Each of these "language folders" contains a folder for each possible grid combin
 models for this specific configuration. Additionally, a results text file is produced
 that documents the performance average (accuracy) of all runs. If the ``--ensemble``
 parameter is passed, separate results text files will be produced.
+
+#### References
+P. Makarov and S. Clematide. [CLUZH at SIGMORPHON 2020 Shared Task on Multilingual Grapheme-to-Phoneme Conversion](https://aclanthology.org/2020.sigmorphon-1.19). In *Proceedings of the 17th SIGMORPHON Workshop on Computational Research in Phonetics, Phonology, and Morphology*, 2020.
+
+S. Wehrli, S. Clematide, and P. Makarov. [CLUZH at SIGMORPHON 2022 Shared Tasks on Morpheme Segmentation and Inflection Generation](https://aclanthology.org/2022.sigmorphon-1.21). In *19th SIGMORPHON Workshop on Computational Research in Phonetics, Phonology, and Morphology*, 2022.
