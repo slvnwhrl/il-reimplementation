@@ -109,6 +109,11 @@ class Transducer(torch.nn.Module):
             self.number_features = None
             self.feat_lookup = None
 
+        self.input_rep = False
+        if args.input_rep:
+            decoder_input_dim += self.enc.output_size
+            self.input_rep = True
+
         # decoder
         self.act_lookup = torch.nn.Embedding(
             num_embeddings=self.number_actions,
@@ -361,7 +366,7 @@ class Transducer(torch.nn.Module):
         else:
             bidirectional_emb, _ = self.enc(input_emb)
 
-        return bidirectional_emb[1:]  # drop BEGIN_WORD
+        return bidirectional_emb
 
     def decoder_step(self, encoder_output: torch.tensor,
                      feature_embedding: Optional[torch.tensor],
@@ -381,7 +386,7 @@ class Transducer(torch.nn.Module):
             Decoder output."""
         # build decoder input
         batch_size = encoder_output.size(1)
-        input_char_embedding = encoder_output \
+        input_char_embedding = encoder_output[1:] \
             [alignment, torch.tensor([i for i in range(batch_size) for _ in range(len(alignment) // batch_size)],
                                      device=self.device)].unsqueeze(dim=0)
         input_char_embedding = torch.reshape(input_char_embedding,
@@ -389,12 +394,19 @@ class Transducer(torch.nn.Module):
         previous_action_embedding = self.act_lookup(action_history)
 
         decoder_inputs = [input_char_embedding, previous_action_embedding]
-        if self.has_features:
+        if self.has_features or self.input_rep:
             # Repeats the feature embedding along the decoder steps dimension.
             number_of_decoder_steps = previous_action_embedding.shape[0]
+
+        if self.has_features:
             broadcast_feature_embedding = feature_embedding.\
                 repeat((number_of_decoder_steps, 1, 1))
             decoder_inputs.append(broadcast_feature_embedding)
+
+        if self.input_rep:
+            broadcast_input_rep_embedding = encoder_output[0].\
+                repeat((number_of_decoder_steps, 1, 1))
+            decoder_inputs.append(broadcast_input_rep_embedding)
 
         decoder_input = torch.cat(decoder_inputs, dim=2)
 

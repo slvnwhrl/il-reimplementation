@@ -469,6 +469,8 @@ def cli_main():
                              "The data is assumed to be in UniMorph format.")
     parser.add_argument("--action-dim", type=int, default=100,
                         help="Action peak_embedding dimension.")
+    parser.add_argument("--input-rep", action="store_true", default=False,
+                        help="tbd")
     parser.add_argument("--enc-type", type=str, default='lstm',
                         choices=ENCODER_MAPPING.keys(),
                         help="Type of used encoder.")
