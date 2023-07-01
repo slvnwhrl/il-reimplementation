@@ -1,5 +1,24 @@
 # A neural transducer
-This package contains a cli-based neural transducer for string transduction tasks. The transducer builds on the model by Makarov & Clematide (2020). This implementation introduces GPU-supported mini-batch training and batched greedy decoding as well as support for transformer-based encoders (see Wehrli & et al. (2022) for further information).
+Shortcuts: [Introduction](https://github.com/slvnwhrl/il-reimplementation#introduction) -
+[SIGMORPHON2022 shared task models]() -
+[Installation](https://github.com/slvnwhrl/il-reimplementation#installation) -
+[Usage](https://github.com/slvnwhrl/il-reimplementation#usage) -
+[Citation](https://github.com/slvnwhrl/il-reimplementation#citation) - 
+[References](https://github.com/slvnwhrl/il-reimplementation#references)
+
+## Introduction
+This package contains a cli-based neural transducer for string transduction tasks. It was successfully used in the 
+SIGMORPHON 2022 shared task on [morpheme segmentation](https://github.com/sigmorphon/2022SegmentationST) and
+[morphological inflection](https://github.com/sigmorphon/2022InflectionST)!
+<br><br>
+The transducer builds on the model by [Makarov & Clematide (2020)](https://aclanthology.org/2020.sigmorphon-1.19).
+This implementation introduces GPU-supported mini-batch training and batched greedy decoding as well as support for
+transformer-based encoders. See[Wehrli & et al. (2022)](https://aclanthology.org/2022.sigmorphon-1.21) for more infos. :)
+
+## SIGMORPHON2022 shared task models
+We received some requests to share our models from our successful submission to the shared task on
+[morpheme segmentation](https://github.com/sigmorphon/2022SegmentationST) and we are happy to share the models!
+So if you want to use these models with this package, have a look at [this repository](https://github.com/slvnwhrl/sigmorphon2022-models) where we host the models.
 
 ## Installation
 Please make sure that you are using Python 3.7.
@@ -150,7 +169,25 @@ models for this specific configuration. Additionally, a results text file is pro
 that documents the performance average (accuracy) of all runs. If the ``--ensemble``
 parameter is passed, separate results text files will be produced.
 
-### References
+## Citation
+If you use this package, please cite the following paper:
+```
+@inproceedings{wehrli-etal-2022-cluzh,
+    title = "{CLUZH} at {SIGMORPHON} 2022 Shared Tasks on Morpheme Segmentation and Inflection Generation",
+    author = "Wehrli, Silvan  and
+      Clematide, Simon  and
+      Makarov, Peter",
+    booktitle = "Proceedings of the 19th SIGMORPHON Workshop on Computational Research in Phonetics, Phonology, and Morphology",
+    month = jul,
+    year = "2022",
+    address = "Seattle, Washington",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2022.sigmorphon-1.21",
+    doi = "10.18653/v1/2022.sigmorphon-1.21",
+}
+```
+
+## References
 P. Makarov and S. Clematide. [CLUZH at SIGMORPHON 2020 Shared Task on Multilingual Grapheme-to-Phoneme Conversion](https://aclanthology.org/2020.sigmorphon-1.19). In *Proceedings of the 17th SIGMORPHON Workshop on Computational Research in Phonetics, Phonology, and Morphology*, 2020.
 
 S. Wehrli, S. Clematide, and P. Makarov. [CLUZH at SIGMORPHON 2022 Shared Tasks on Morpheme Segmentation and Inflection Generation](https://aclanthology.org/2022.sigmorphon-1.21). In *19th SIGMORPHON Workshop on Computational Research in Phonetics, Phonology, and Morphology*, 2022.
