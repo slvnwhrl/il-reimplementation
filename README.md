@@ -1,10 +1,10 @@
 # A neural transducer
-Shortcuts: [Introduction](https://github.com/slvnwhrl/il-reimplementation#introduction) -
-[SIGMORPHON2022 shared task models]() -
-[Installation](https://github.com/slvnwhrl/il-reimplementation#installation) -
-[Usage](https://github.com/slvnwhrl/il-reimplementation#usage) -
-[Citation](https://github.com/slvnwhrl/il-reimplementation#citation) - 
-[References](https://github.com/slvnwhrl/il-reimplementation#references)
+Shortcuts: [Introduction](https://github.com/slvnwhrl/il-reimplementation/tree/development#introduction) -
+[SIGMORPHON2022 shared task models](https://github.com/slvnwhrl/il-reimplementation/tree/development#sigmorphon2022-shared-task-models) -
+[Installation](https://github.com/slvnwhrl/il-reimplementation/tree/development#installation) -
+[Usage](https://github.com/slvnwhrl/il-reimplementation/tree/development#usage) -
+[Citation](https://github.com/slvnwhrl/il-reimplementation/tree/development#citation) - 
+[References](https://github.com/slvnwhrl/il-reimplementation/tree/development#references)
 
 ## Introduction
 This package contains a cli-based neural transducer for string transduction tasks. It was successfully used in the 
