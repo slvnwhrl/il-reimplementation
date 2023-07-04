@@ -13,7 +13,7 @@ SIGMORPHON 2022 shared task on [morpheme segmentation](https://github.com/sigmor
 <br><br>
 The transducer builds on the model by [Makarov & Clematide (2020)](https://aclanthology.org/2020.sigmorphon-1.19).
 This implementation introduces GPU-supported mini-batch training and batched greedy decoding as well as support for
-transformer-based encoders. See[Wehrli & et al. (2022)](https://aclanthology.org/2022.sigmorphon-1.21) for more infos. :)
+transformer-based encoders. See [Wehrli & et al. (2022)](https://aclanthology.org/2022.sigmorphon-1.21) for more infos. :)
 
 ## SIGMORPHON2022 shared task models
 We received some requests to share our models from our successful submission to the shared task on
