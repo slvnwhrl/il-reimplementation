@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import sys
+import dataclasses
 
 import progressbar
 
@@ -305,7 +306,7 @@ def main(args: argparse.Namespace):
     train_subset_loader = utils.Dataset(
         random.sample(training_data.samples, int(len(training_data.samples) * args.train_subset_eval_size / 100))) \
         .get_data_loader(batch_size=eval_batch_size, device=args.device)
-    # rollin_schedule = inverse_sigmoid_schedule(args.k)
+    rollin_schedule = inverse_sigmoid_schedule(args.k)
     max_patience = args.patience
 
     if args.loss_reduction == "sum":
@@ -322,6 +323,9 @@ def main(args: argparse.Namespace):
     best_epoch = 0
     patience = 0
 
+    sample_ids = list(range(len(training_data.samples)))
+    sample_stack = []
+
     for epoch in range(args.epochs):
 
         logging.info("Training...")
@@ -329,8 +333,21 @@ def main(args: argparse.Namespace):
         transducer_.zero_grad()
         with utils.Timer():
             train_loss = 0.
-            # rollin not implemented at the moment
-            # rollin = rollin_schedule(epoch)
+
+            #rollin
+            if args.rollin is not None and args.rollin:
+                rollin = rollin_schedule(epoch)
+                nr_samples = int(len(training_data.samples) * rollin)
+                rollin_samples = random.sample(sample_ids, nr_samples)
+                with torch.no_grad():
+                    # restore
+                    for id_, sample in sample_stack:
+                        training_data.samples[id_] = sample
+                    sample_stack = []
+                    for id_ in rollin_samples:
+                        sample_stack.append((id_, dataclasses.replace(training_data.samples[id_])))
+                        transducer_.roll_in(training_data.samples[id_], rollin)
+
             j = 0
             for j, batch in enumerate(training_data_loader):
                 losses = transducer_.training_step(encoded_input=batch.encoded_input,
@@ -478,8 +495,10 @@ def cli_main():
                         help="Number of decoder LSTM layers.")
     parser.add_argument("--beam-width", type=int, default=4,
                         help="Beam width for beam search decoding. A value < 1 will disable beam search decoding.")
-    # parser.add_argument("--k", type=int, default=1,
-    #                     help="k for inverse sigmoid rollin schedule.")
+    parser.add_argument("--rollin", action="store_true", default=False,
+                        help="Rollin.")
+    parser.add_argument("--k", type=int, default=1,
+                         help="k for inverse sigmoid rollin schedule.")
     parser.add_argument("--patience", type=int, default=12,
                         help="Maximal patience for early stopping.")
     parser.add_argument("--epochs", type=int, default=60,
