@@ -532,8 +532,8 @@ class Transducer(torch.nn.Module):
 
         # trim action history
         # --> first element is not considered (begin-of-sequence-token)
-        # --> and only token up to the first end-of-sequence-token (including it)
-        action_history = [seq[1:(seq.index(EndOfSequence()) + 1 if EndOfSequence() in seq else -1)]
+        # --> and only token up to the first end-of-sequence-token (as encoded integer output, including it)
+        action_history = [seq[1:(seq.index(END_WORD) + 1 if END_WORD in seq else -1)]
                           for seq in action_history.squeeze(dim=0).tolist()]
 
         return Output(action_history, self.decode_encoded_output(input_, action_history),
